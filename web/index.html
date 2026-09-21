@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>三人行 · Laya 斗地主</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
+<body>
+<header class="topbar"><a class="brand" href="/" aria-label="三人行首页"><span class="brandmark">♠</span><span>三人行<small>LAYA · 斗地主</small></span></a><div class="header-right"><span class="connection" id="connection">正在连接本地模型</span><button class="ghost" id="rulesButton">玩法说明 <span>↗</span></button></div></header>
+<main>
+<section class="intro"><div><p class="eyebrow">ONE TABLE. THREE MINDS.</p><h1>好牌，要一起打。</h1><p class="subtitle">你与两位本地 AI，同桌见招拆招。</p></div><div class="round-info"><span id="round">第 — 局</span><strong id="phase">准备开桌</strong><small>经典三人 · 无癞子</small></div></section>
+<section class="table" aria-label="斗地主牌桌">
+ <div class="table-top"><span class="table-caption">LOCAL INTELLIGENCE CLUB</span><div class="bottom-zone"><span>公开底牌</span><div id="bottom" class="mini-cards"></div></div><span class="table-caption right-caption">54 CARDS · 3 PLAYERS</span></div>
+ <div class="opponents">
+  <section class="player opponent" id="player2" aria-label="左侧 AI"><div class="avatar">♣</div><div><h2>青竹 <span>AI</span></h2><p class="role" id="role2">待定身份</p></div><span class="score" id="score2">0 分</span><div class="card-back"><span id="count2">17</span><small>张</small></div><p class="player-status" id="status2">等待叫分</p></section>
+  <div class="center"><span class="pill" id="turn">正在准备牌局</span><div id="bidHistory" class="bid-history"></div><div class="trick" id="trick"></div><p id="tableMessage" class="table-message">一副好牌，从这里开始。</p></div>
+  <section class="player opponent" id="player1" aria-label="右侧 AI"><div class="avatar">♦</div><div><h2>赤松 <span>AI</span></h2><p class="role" id="role1">待定身份</p></div><span class="score" id="score1">0 分</span><div class="card-back"><span id="count1">17</span><small>张</small></div><p class="player-status" id="status1">等待叫分</p></section>
+ </div>
+ <div id="result" class="result" hidden></div>
+ <div class="human-heading"><div class="player human" id="player0"><div class="avatar">你</div><div><h2>你的手牌 <span id="count0">17 张</span></h2><p class="role" id="role0">待定身份</p></div><span class="score" id="score0">0 分</span></div><span class="hand-hint" id="selection">点选牌面，组合出牌</span></div>
+ <div class="hand-scroll"><div id="hand" class="hand" role="group" aria-label="你的手牌"></div></div>
+ <div class="actions"><div id="bidActions" hidden><button data-bid="0" class="secondary">不叫</button><button data-bid="1">1 分</button><button data-bid="2">2 分</button><button data-bid="3" class="primary">3 分</button></div><div id="playActions" hidden><button id="clear" class="secondary">取消选择</button><button id="hint" class="secondary">提示</button><button id="pass" class="secondary">不出</button><button id="play" class="primary">出牌 <span>↗</span></button></div><button id="nextRound" class="primary" hidden>再来一局 ↗</button><button id="retry" class="secondary" hidden>重试 / 同步牌局</button></div>
+ <p id="notice" role="status" aria-live="polite" class="notice"></p>
+</section>
+<section class="below"><div class="decision"><span class="section-label">BEHIND THE MOVE</span><h2>同一个模型，两种处境。</h2><p id="aiInfo">Laya 共享权重，各自只看自己的手牌与公开信息。</p><div class="tags"><span>真实本地推理</span><span>未知手牌采样</span><span>规则与策略校验</span></div></div><details class="history-panel"><summary>公开牌局记录 <span>↗</span></summary><ol id="history"><li>尚未出牌</li></ol></details><div class="table-tools"><button class="ghost" id="newRound">重新发牌</button><p>分数仅作本次牌桌记录。<br>无联网对手，无金钱交易。</p></div></section>
+<footer><span>牌有大小，配合有章法。</span><span>Laya Multilingual · 322M · MLX <b> / </b> 在你的 Mac 上运行</span></footer>
+</main>
+<dialog id="rules"><button id="closeRules" class="dialog-close" aria-label="关闭玩法说明">×</button><p class="eyebrow">TABLE RULES</p><h2>三人一桌，地主对农民。</h2><p>每人 17 张，底牌 3 张。轮流不叫或叫 1 / 2 / 3 分，必须高于已叫分；3 分立即定地主。全不叫重发。地主拿公开底牌并先出牌，任一农民出完则两位农民一起赢。</p><h3>出牌与牌型</h3><p>同牌型、同长度比较主干点数；炸弹压普通牌，王炸最大。连续两家不出后，最后出牌者重新领出，领出不能过牌。顺子至少 5 张，连对至少 3 对，飞机至少 2 组三张；这些连续主体都不能含 2 或王。</p><p>支持三带一、三带二、飞机带单 / 对、四带二单 / 两对。飞机单翼允许对子拆单，但不能包含主干点数；对子翼必须点数各不相同。四带二单允许一对。飞机单翼及四带二单都不能同时带双王。四带二不是炸弹。</p><h3>分数怎么算</h3><p>叫分为底分。每出一次炸弹 / 王炸翻倍；地主赢且农民都没出过牌为春天，农民赢且地主仅出过一手为反春天，各再翻倍。地主得失为每位农民的两倍，三家得失合计为零。</p><h3>AI 如何决策</h3><p>程序生成合法候选，评估拆牌、农民配合和未知手牌采样；Laya 从筛选后的动作中选择。模型未经过斗地主专项训练，采样评分不是真实胜率。模型故障会暂停并允许重试，不会悄悄换成随机 AI。</p></dialog>
+</body></html>
