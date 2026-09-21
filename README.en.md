@@ -73,7 +73,7 @@ Keep the complete directory, including model configuration and tokenizer files. 
 ./run.sh
 ```
 
-Alternatively, double-click `启动斗地主.command` in Finder. After GPU warm-up, the browser opens **http://127.0.0.1:8770**. Keep the terminal open; press **Ctrl+C** to stop the server and release the model. Closing the browser alone does not stop Python. In-memory rounds and scores disappear when the server stops.
+Alternatively, double-click `启动斗地主.command` in Finder. After GPU warm-up, the browser opens the game. The default first tries **http://127.0.0.1:8770**; if occupied, it automatically binds an available port and prints and opens the actual address. Keep the terminal open; press **Ctrl+C** to stop the server and release the model. Closing the browser alone does not stop Python. In-memory rounds and scores disappear when the server stops.
 
 Options:
 
@@ -165,7 +165,7 @@ docs/              Rule references and validation report
 ## Troubleshooting
 
 - **No Metal device available:** run in a normal local macOS terminal, not a GPU-less container or remote Linux environment.
-- **Port occupied:** stop the previous instance or pass `--port 8771`. The server binds before loading the model.
+- **Port occupied:** the default launch automatically selects an available port; there is no need to terminate a system process. An explicit `--port` remains fixed and produces a clear error if occupied. Choose another port or omit the option. The server binds before loading the model; use the actual ready URL printed in the terminal.
 - **Model not found:** download the entire checkpoint or pass `--model`. The runtime forces offline mode and never downloads weights automatically.
 - **Disconnected/expired game:** ensure the server is running. Restarting the server clears all in-memory rounds.
 - **Another table is using the model:** GPU calls are serialized; retry after that decision completes.

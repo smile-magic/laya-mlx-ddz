@@ -1,5 +1,6 @@
 """Local-only, authoritative Dou Dizhu server. One GPU model, isolated rounds."""
 import argparse
+import errno
 import json
 import os
 from pathlib import Path
@@ -152,20 +153,31 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--model',type=Path,default=ROOT/'models/laya')
-    parser.add_argument('--port',type=int,default=8770)
+    parser.add_argument('--port',type=int,help='Fixed port; default tries 8770, then an available port.')
     parser.add_argument('--no-browser',action='store_true')
     parser.add_argument('--samples',type=int,default=6,help='Hidden-hand samples per AI play (1–32).')
     args=parser.parse_args()
-    if not 1<=args.port<=65535 or not 1<=args.samples<=32:
+    if (args.port is not None and not 1<=args.port<=65535) or not 1<=args.samples<=32:
         parser.error('port 需在 1–65535，samples 需在 1–32。')
     model=args.model.expanduser().resolve()
     if not (model/'model.safetensors').is_file():
         parser.error(f'找不到本地模型 {model}。请按 README 下载模型。')
-    # Bind first: an occupied port must not load a second GPU model.
-    with Server(('127.0.0.1',args.port),None) as server:
+    # Bind directly, without a separate availability probe that can race.
+    # Explicit port failures must still stop before loading the GPU model.
+    port=args.port if args.port is not None else 8770
+    try:
+        server=Server(('127.0.0.1',port),None)
+    except OSError as error:
+        if error.errno != errno.EADDRINUSE:
+            raise
+        if args.port is not None:
+            parser.error(f'端口 {port} 已被占用。请换一个 --port，或省略 --port 自动选择可用端口。')
+        print(f'默认端口 {port} 已被占用，正在自动选择可用端口…',flush=True)
+        server=Server(('127.0.0.1',0),None)
+    with server:
         print('正在加载 Laya 并预热 GPU…',flush=True)
         server.policy=Policy(model,args.samples)
-        url=f'http://127.0.0.1:{args.port}'
+        url=f'http://127.0.0.1:{server.server_port}'
         print(f'已就绪：{url}  （Ctrl+C 停止）',flush=True)
         if not args.no_browser:
             webbrowser.open(url)

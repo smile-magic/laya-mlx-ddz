@@ -1,9 +1,67 @@
 import http.client
+import contextlib
+import errno
+import io
 import json
 import threading
 import unittest
+from unittest.mock import patch
+import server as app
 from ddz.rules import legal_moves
 from server import Server
+
+
+class StartupTests(unittest.TestCase):
+    def test_default_port_collision_opens_browser_on_actual_free_port(self):
+        started=[]
+        def bind(address, policy):
+            # Occupy a dynamic port, then route the preferred port to it.
+            port=occupied.server_port if address[1]==8770 else address[1]
+            result=Server((address[0],port),policy)
+            started.append(result)
+            return result
+        with Server(('127.0.0.1',0),None) as occupied, \
+             patch('sys.argv',['server.py']), \
+             patch.object(app.Path,'is_file',return_value=True), \
+             patch.object(app,'Server',side_effect=bind), \
+             patch.object(app,'Policy') as policy, \
+             patch.object(Server,'serve_forever'), \
+             patch.object(app.webbrowser,'open') as browser, \
+             contextlib.redirect_stdout(io.StringIO()) as output:
+            app.main()
+            policy.assert_called_once()
+            self.assertEqual(len(started),1)
+            actual=started[0].server_port
+            self.assertNotEqual(actual,occupied.server_port)
+            browser.assert_called_once_with(f'http://127.0.0.1:{actual}')
+            self.assertIn('已被占用',output.getvalue())
+            self.assertIn(f'http://127.0.0.1:{actual}',output.getvalue())
+        self.assertEqual(started[0].socket.fileno(),-1)
+
+    def test_explicit_busy_port_exits_clearly_before_model_load(self):
+        with Server(('127.0.0.1',0),None) as occupied, \
+             patch('sys.argv',['server.py','--port',str(occupied.server_port)]), \
+             patch.object(app.Path,'is_file',return_value=True), \
+             patch.object(app,'Policy') as policy, \
+             patch.object(app.webbrowser,'open') as browser, \
+             contextlib.redirect_stderr(io.StringIO()) as error:
+            with self.assertRaises(SystemExit) as raised:
+                app.main()
+            self.assertEqual(raised.exception.code,2)
+            self.assertIn('已被占用',error.getvalue())
+            policy.assert_not_called()
+            browser.assert_not_called()
+
+    def test_other_bind_errors_do_not_trigger_fallback(self):
+        with patch('sys.argv',['server.py']), \
+             patch.object(app.Path,'is_file',return_value=True), \
+             patch.object(app,'Server',side_effect=OSError(errno.EACCES,'denied')) as bind, \
+             patch.object(app,'Policy') as policy:
+            with self.assertRaises(OSError) as raised:
+                app.main()
+            self.assertEqual(raised.exception.errno,errno.EACCES)
+            bind.assert_called_once()
+            policy.assert_not_called()
 
 
 class StubPolicy:
