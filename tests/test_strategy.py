@@ -1,10 +1,11 @@
 import os
 import random
+from dataclasses import replace
 import unittest
 from collections import Counter
 from ddz.game import Game, Observation
 from ddz.rules import classify, legal_moves, ranks
-from ddz.strategy import Policy, evaluate, sample_hands, exact_turns, shape_cost
+from ddz.strategy import Policy, evaluate, sample_hands, exact_turns, shape_cost, control_cost, controlled_finish
 
 
 def scenario(hand, others, landlord=1, target=(), leader=None):
@@ -33,6 +34,53 @@ class StrategyTests(unittest.TestCase):
         obs=scenario([3,3],[[4],[5]],landlord=0)
         p=fake_policy(True);cards,info=p.choose(obs)
         self.assertEqual(cards,[3,3]);self.assertTrue(info['intervened'])
+
+    def test_landlord_does_not_burn_opening_rocket(self):
+        # Reproduces an actual allowed first move with a scattered 20-card hand.
+        g=Game(random.Random(12));g.bid(g.turn,3)
+        rows,_=evaluate(g.observation(g.turn),6)
+        self.assertFalse(any(r['eligible'] and r['move'] and r['move'].kind=='rocket'
+                             for r in rows))
+
+    def test_rocket_is_one_remaining_group(self):
+        self.assertEqual(shape_cost((16,17)),1)
+        self.assertEqual(shape_cost((3,16,17)),2)
+
+    def test_rocket_then_last_combination_is_allowed_and_forced(self):
+        obs=scenario([3,3,16,17],[[4],[5]],landlord=0)
+        rows,_=evaluate(obs,6)
+        self.assertEqual([r['move'].cards for r in rows if r['eligible']],[(16,17)])
+
+    def test_rocket_can_stop_opponent_winning_next_lead(self):
+        obs=replace(scenario([3,4,16,17],[[15],[5,6]],target=(13,13),leader=1),passes=1)
+        rows,_=evaluate(obs,6)
+        self.assertEqual([r['move'].cards for r in rows if r['eligible']],[(16,17)])
+
+    def test_normal_bomb_finish_proof_accounts_for_unknown_controls(self):
+        own=[3]*4+[7,7]
+        risky=scenario(own,[[4]*4,[5]],landlord=0)
+        self.assertFalse(controlled_finish(risky,classify([3]*4)))
+        safe=scenario(own,[[16],[17]],landlord=0)
+        self.assertTrue(controlled_finish(safe,classify([3]*4)))
+        rocket_risk=scenario(own,[[16,17],[5]],landlord=0)
+        self.assertFalse(controlled_finish(rocket_risk,classify([3]*4)))
+
+    def test_opening_guard_does_not_force_breaking_all_bombs(self):
+        hand=tuple(r for r in range(3,8) for _ in range(4))
+        obs=Observation(0,hand,(20,17,17),0,(),None,0,(),hand[:3],'play',((0,3),),3)
+        rows,_=evaluate(obs,2)
+        self.assertFalse(any(r['reserved'] for r in rows))
+
+    def test_control_cost_is_conditional_not_absolute(self):
+        move=classify([16]);target=classify([14])
+        intact=control_cost((3,4,16,17),move,target,10)
+        no_rocket=control_cost((3,4,16),move,target,10)
+        urgent=control_cost((3,4,16,17),move,target,1)
+        self.assertGreater(intact,no_rocket)
+        self.assertLess(urgent,intact)
+        bomb=classify([3]*4)
+        hand=tuple([3]*4+[5,7,9])
+        self.assertGreater(control_cost(hand,bomb,None,10),control_cost(hand,bomb,target,10))
 
     def test_pass_is_only_legal_when_following(self):
         for target,leader in [((),None),((5,),1)]:
@@ -127,6 +175,12 @@ class ModelTests(unittest.TestCase):
                 s=g.turn;obs=g.observation(s);cards,info=self.policy.choose(obs)
                 self.assertGreater(info['input_tokens'],0);self.assertLess(info['input_tokens'],1024)
                 g.play(s,g.ids_for(s,cards))
+
+    def test_real_model_does_not_open_scattered_hand_with_rocket(self):
+        g=Game(random.Random(12));g.bid(g.turn,3)
+        cards,_=self.policy.choose(g.observation(g.turn))
+        self.assertNotEqual(cards,[16,17])
+        self.assertIn(classify(cards),legal_moves(g.observation(g.turn).hand))
 
     def test_real_prompt_not_truncated(self):
         g=Game(random.Random(73));g.bid(g.turn,3)

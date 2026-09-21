@@ -18,9 +18,14 @@ def shape_cost(hand):
     if not hand:
         return 0.0
     answers = []
-    for sequences_first in (False,True):
+    plans = [(False,False),(True,False)]
+    if 16 in hand and 17 in hand:
+        plans += [(False,True),(True,True)]
+    for sequences_first, keep_rocket in plans:
         c = Counter(hand)
-        groups = 0
+        groups = int(keep_rocket)
+        if keep_rocket:
+            c[16] = c[17] = 0
         def sequences(mult, minimum):
             nonlocal groups
             for start in range(3,15):
@@ -64,6 +69,63 @@ def allies(a,b,landlord):
     return a==b or (a != landlord and b != landlord)
 
 
+def control_cost(hand, move, target, enemy_low):
+    """Opportunity cost, not a rule: keep re-entry cards and intact controls.
+
+    Urgent defense reduces the penalty. Immediate finishes bypass this function
+    at the call site; sampled threats can still outweigh these preferences.
+    """
+    original, used = Counter(hand), Counter(move.cards)
+    cost = 0.0
+    if original[16] and original[17] and move.kind != 'rocket' and (used[16] or used[17]):
+        cost += 1.2  # A pair of jokers is an indivisible control resource.
+    cost += sum(.8 for r,n in original.items() if n == 4 and 0 < used[r] < 4)
+    if move.kind in ('bomb','rocket'):
+        cost += .9
+        if target is None and classify(subtract(hand,move.cards)) is None:
+            cost += 1.2  # Already on lead; do not spend a re-entry merely to lead again.
+    if target is None and move.kind == 'single' and move.main >= 15:
+        if classify(subtract(hand,move.cards)) is None:
+            cost += .6
+    return cost * (.25 if enemy_low <= 2 else 1.0)
+
+
+def visible_unseen(obs):
+    pool = Counter({**{r:4 for r in range(3,16)},16:1,17:1})
+    pool.subtract(obs.hand)
+    for _,cards in obs.history:
+        pool.subtract(cards)
+    return pool
+
+
+def controlled_finish(obs, move):
+    """Prove only: an unbeatable bomb/rocket, then one legal final lead.
+
+    Aggregate unseen ranks deliberately overestimate opponents' bombs. This
+    does not use sampled or actual private hands, and can miss a valid plan.
+    """
+    if move is None or move.kind not in ('bomb','rocket'):
+        return False
+    rest = subtract(obs.hand,move.cards)
+    if not rest or classify(rest) is None:
+        return False
+    if move.kind == 'rocket':
+        return True
+    unseen = visible_unseen(obs)
+    capacity = max(obs.counts[s] for s in range(3) if s != obs.seat)
+    rocket_possible = capacity >= 2 and unseen[16] > 0 and unseen[17] > 0
+    higher_bomb = capacity >= 4 and any(unseen[r] >= 4 for r in range(move.main+1,16))
+    return not rocket_possible and not higher_bomb
+
+
+def opening_reserve(obs, move, ordinary_lead_exists):
+    """A disclosed opening preference, not a claim of game-theoretic dominance."""
+    return (ordinary_lead_exists and not obs.history and not obs.target
+            and obs.seat == obs.landlord and move is not None
+            and move.kind in ('bomb','rocket') and not controlled_finish(obs,move)
+            and len(move.cards) < len(obs.hand))
+
+
 def move_score(hand, move, seat, landlord, counts, leader, target):
     team_leads = target is not None and allies(seat,leader,landlord)
     enemy_low = min(counts[s] for s in range(3) if not allies(seat,s,landlord))
@@ -77,8 +139,7 @@ def move_score(hand, move, seat, landlord, counts, leader, target):
     for r,n in Counter(move.cards).items():
         if n < original[r] and original[r]>=2:
             score -= .14*(original[r]-n)  # Avoid needlessly splitting combinations.
-    if move.kind in ('bomb','rocket'):
-        score -= .9
+    score -= control_cost(hand,move,target,enemy_low)
     if team_leads:
         score -= 1.5 if counts[leader]<=5 else .65
     if enemy_low==1:
@@ -102,10 +163,7 @@ def _seed(obs):
 
 def sample_hands(obs, rng):
     """Deal unseen cards, respecting public bottom cards still held by landlord."""
-    pool=Counter({**{r:4 for r in range(3,16)},16:1,17:1})
-    pool.subtract(obs.hand)
-    for _,cards in obs.history:
-        pool.subtract(cards)
+    pool=visible_unseen(obs)
     if any(n<0 for n in pool.values()):
         raise ValueError('公开牌面与手牌不一致。')
     hands=[[] for _ in range(3)]
@@ -188,7 +246,16 @@ def evaluate(obs, samples=6):
     if not legal:
         raise ValueError('没有合法动作。')
     scores={m:move_score(obs.hand,m,obs.seat,obs.landlord,obs.counts,obs.leader,target) for m in legal}
-    ordered=sorted(legal,key=lambda m:scores[m],reverse=True)
+    finishing={m for m in legal if m and len(m.cards)==len(obs.hand)}
+    forced = finishing or {m for m in legal if controlled_finish(obs,m)}
+    original=Counter(obs.hand)
+    def preserves_controls(m):
+        return (m is not None and m.kind not in ('bomb','rocket')
+                and not (original[16] and original[17] and any(r>=16 for r in m.cards))
+                and not any(original[r]==4 for r in m.cards))
+    ordinary_lead_exists=any(preserves_controls(m) for m in legal)
+    reserved={m for m in legal if opening_reserve(obs,m,ordinary_lead_exists)}
+    ordered=sorted(legal,key=lambda m:(m in forced,m not in reserved,scores[m]),reverse=True)
     # Preserve distinct tactical alternatives before limiting the model choices.
     shortlist=ordered[:2]
     enemy_low=min(obs.counts[s] for s in range(3) if not allies(s,obs.seat,obs.landlord))
@@ -213,8 +280,6 @@ def evaluate(obs, samples=6):
             break
         if m in scores and m not in shortlist:
             shortlist.append(m)
-    # A legal move that empties our hand is a team win, independent of hidden cards.
-    finishing=next((m for m in legal if m and len(m.cards)==len(obs.hand)),None)
     rng=random.Random(_seed(obs))
     worlds=[sample_hands(obs,rng) for _ in range(samples)]
     rows=[]
@@ -225,13 +290,15 @@ def evaluate(obs, samples=6):
         turns=exact_turns(rest)
         score=scores[m]+(shape_cost(rest)-turns)*2+outcome*3.5-risk*5
         rows.append({'move':m,'score':score,'risk':risk,'sample_value':outcome,'turns':turns})
-    best=max(rows,key=lambda x:x['score'])
+    best=max((r for r in rows if r['move'] not in reserved),key=lambda x:x['score'])
     for row in rows:
-        row['eligible'] = row['move']==finishing if finishing else (
+        row['reserved'] = row['move'] in reserved
+        row['eligible'] = row['move'] in forced if forced else (
+            not row['reserved'] and
             row['score']>=best['score']-.20
             and row['risk']<=best['risk']+1e-9
             and row['sample_value']>=best['sample_value']-.5/samples)
-    rows.sort(key=lambda x:x['score'],reverse=True)
+    rows.sort(key=lambda x:(x['eligible'],x['score']),reverse=True)
     return rows,len(legal)
 
 
@@ -260,6 +327,8 @@ class Policy:
         recent=';'.join(f'{s}:{list(cs)}' for s,cs in obs.history[-8:])
         state=(f'Dou Dizhu. Ranks 3..14=3..A,15=2,16/17=jokers. You seat {obs.seat}; landlord {obs.landlord}. '
                'Landlord plays alone; both farmers win together. Other hands are hidden. '
+               'Preserve bombs and jokers for regaining control. Prefer organized low leads, '
+               'unless finishing or defending an urgent threat. Do not overtake teammates needlessly. '
                f'Your hand {list(obs.hand)}. Counts {list(obs.counts)}. Target {list(obs.target)} from {obs.leader}. '
                f'Unseen rank counts {dict(sorted((r,n) for r,n in unseen.items() if n>0))}. '
                f'Recent public plays {recent}. Scores are heuristic, not true win probabilities.')

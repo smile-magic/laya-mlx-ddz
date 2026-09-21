@@ -18,6 +18,25 @@ class GameTests(unittest.TestCase):
         self.assertEqual(g.observation(1).hand,ranks(g.hands[1]))
         self.assertEqual(g.observation(1).bottom,())
 
+    def test_dealing_uses_shuffle_positions_without_strength_balancing(self):
+        class FixedShuffle:
+            calls=0
+            def shuffle(self,deck):
+                self.calls+=1
+                # Deliberately strong first seat: both jokers and three quads.
+                first=[52,53]+list(range(12))+[48,49,50]
+                deck[:]=first+[c for c in range(54) if c not in first]
+                self.dealt=deck.copy()
+            def randrange(self,n):return 2
+        rng=FixedShuffle();g=Game(rng)
+        self.assertEqual(rng.calls,1)
+        for seat in range(3):
+            self.assertEqual(set(g.hands[seat]),set(rng.dealt[seat*17:(seat+1)*17]))
+        self.assertEqual(g.bottom,rng.dealt[51:])
+        self.assertTrue({52,53}<=set(g.hands[0]))
+        g.deal()
+        self.assertEqual(rng.calls,2)  # Exactly one shuffle per requested deal.
+
     def test_bid_raise_three_and_bottom(self):
         g=self.game();s=g.turn
         g.bid(s,1)
